@@ -1,136 +1,141 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WILLY V8.8 - CORE</title>
-    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <meta charset="UTF-8">
+    <title>WILLY V9.0 - DEBUG CORE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; text-align: center; padding: 20px; }
-        #board { width: 400px; margin: 20px auto; border: 2px solid #333; }
-        #status { background: #111; padding: 10px; border: 1px solid #0f0; margin-bottom: 10px; min-height: 20px; }
-        .stats { margin-bottom: 10px; font-size: 1.2em; }
-        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; z-index: 10; }
+        body { background: #000; color: #0f0; font-family: monospace; text-align: center; }
+        #board { width: 350px; margin: 20px auto; border: 2px solid #333; }
+        #debug-log { 
+            background: #111; color: #0f0; border: 1px solid #333; 
+            width: 90%; max-width: 500px; margin: 10px auto; 
+            height: 100px; overflow-y: scroll; font-size: 10px; text-align: left; padding: 5px;
+        }
+        .stats { font-size: 1.2em; color: #fff; }
+        button { padding: 10px; background: #222; color: #0f0; border: 1px solid #0f0; cursor: pointer; }
     </style>
 </head>
 <body>
 
-<div id="loading"><h1>WAKING UP WILLY... (Wait 10s)</h1></div>
+    <h2>WILLY V9.0: DEBUG MODE</h2>
+    <div class="stats">GAMES: <span id="g_count">1</span> | WINS: <span id="w_count">0</span></div>
+    
+    <div id="board"></div>
+    
+    <div id="debug-log"> [SYSTEM] Initializing...<br></div>
+    
+    <button onclick="location.reload()">FORCE RESTART ENGINE</button>
 
-<h2>WILLY V8.8: ENGINE LIVE</h2>
-<div class="stats">GAMES: <span id="g_count">1</span> | WINS: <span id="w_count">0</span></div>
-<div id="status">Willy is thinking...</div>
-<div id="board"></div>
-<button onclick="location.reload()" style="padding:10px; cursor:pointer;">HARD RESET</button>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 
-<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <script>
+        let pyodide;
+        let board;
 
-<script>
-    let pyodide;
-    let board;
-    let wins = 0;
-    let games = 1;
+        function log(msg) {
+            $('#debug-log').append(" > " + msg + "<br>");
+            $("#debug-log").scrollTop($("#debug-log")[0].scrollHeight);
+        }
 
-    async function start() {
-        // 1. Load Pyodide
-        pyodide = await loadPyodide();
-        await pyodide.loadPackage("micropip");
-        const micropip = pyodide.pyimport("micropip");
-        await micropip.install("python-chess");
-
-        // 2. Inject Willy
-        await pyodide.runPythonAsync(`
+        async function initWilly() {
+            try {
+                log("Downloading Pyodide...");
+                pyodide = await loadPyodide();
+                log("Loading Micropip...");
+                await pyodide.loadPackage("micropip");
+                const micropip = pyodide.pyimport("micropip");
+                log("Installing python-chess (This takes 10s)...");
+                await micropip.install("python-chess");
+                
+                log("Injecting Willy's Brain...");
+                await pyodide.runPythonAsync(`
 import chess
 import random
 import math
 
-class Willy:
+class WillyV9:
+    def __init__(self):
+        self.values = {1:100, 2:310, 3:335, 4:500, 5:950, 6:20000}
+    
+    def get_move(self, fen):
+        board = chess.Board(fen)
+        # Fast Minimax (Depth 2 for Web speed)
+        best_val = -math.inf
+        best_move = None
+        for move in board.legal_moves:
+            board.push(move)
+            val = self.eval(board)
+            board.pop()
+            if val > best_val:
+                best_val = val
+                best_move = move
+        return best_move.uci() if best_move else list(board.legal_moves)[0].uci()
+
     def eval(self, b):
-        if b.is_checkmate(): return 999999 if b.turn == chess.WHITE else -999999
-        values = {1:100, 2:310, 3:335, 4:500, 5:950, 6:20000}
         s = 0
         for sq, p in b.piece_map().items():
-            v = values.get(p.piece_type, 0)
+            v = self.values.get(p.piece_type, 0)
             s += v if p.color == chess.BLACK else -v
         return s
 
-    def minimax(self, b, depth, a, beta, maximizing):
-        if depth == 0 or b.is_game_over(): return self.eval(b)
-        if maximizing:
-            v = -math.inf
-            for m in b.legal_moves:
-                b.push(m); v = max(v, self.minimax(b, depth-1, a, beta, False)); b.pop()
-                a = max(a, v)
-                if beta <= a: break
-            return v
-        else:
-            v = math.inf
-            for m in b.legal_moves:
-                b.push(m); v = min(v, self.minimax(b, depth-1, a, beta, True)); b.pop()
-                beta = min(beta, v)
-                if beta <= a: break
-            return v
-
-bot = Willy()
-        `);
-
-        $('#loading').hide();
-        $('#status').text("YOUR MOVE (WHITE)");
-        
-        board = Chessboard('board', {
-            draggable: true,
-            position: 'start',
-            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
-            onDrop: onDrop
-        });
-    }
-
-    async function onDrop(source, target) {
-        let move = source + target;
-        let fen = board.fen();
-
-        let result = await pyodide.runPythonAsync(`
-import chess
-b = chess.Board("${fen}")
-try:
-    m = chess.Move.from_uci("${move}")
-    if m in b.legal_moves:
-        b.push(m)
-        if not b.is_game_over():
-            # WILLY MOVES
-            best_m = None
-            max_v = -math.inf
-            for move_option in b.legal_moves:
-                b.push(move_option)
-                val = bot.minimax(b, 2, -math.inf, math.inf, False)
-                b.pop()
-                if val > max_v:
-                    max_v = val
-                    best_m = move_option
-            b.push(best_m)
-        
-        # [NEW FEN, STATUS, DID WILLY WIN, IS OVER]
-        [b.fen(), "WILLY MOVED", b.is_checkmate() and b.result()=="0-1", b.is_game_over()]
-    else:
-        None
-except:
-    None
-        `);
-
-        if (!result) return 'snapback';
-
-        board.position(result[0]);
-        $('#status').text(result[1]);
-
-        if (result[3]) {
-            games++;
-            if (result[2]) { wins++; $('#status').text("WILLY WINS!"); }
-            else { $('#status').text("GAME OVER / DRAW"); }
-            $('#g_count').text(games); $('#w_count').text(wins);
+willy = WillyV9()
+                `);
+                
+                log("System Ready! Drawing Board...");
+                setupBoard();
+            } catch (err) {
+                log("CRITICAL ERROR: " + err.message);
+            }
         }
-    }
 
-    start();
-</script>
+        function setupBoard() {
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+                onDrop: handleMove
+            });
+            log("Board Active. Make your move.");
+        }
+
+        async function handleMove(source, target) {
+            let move = source + target;
+            log("User Move Attempt: " + move);
+            
+            try {
+                let result = await pyodide.runPythonAsync(`
+import chess
+b = chess.Board("${board.fen()}")
+m = chess.Move.from_uci("${move}")
+if m in b.legal_moves:
+    b.push(m)
+    if not b.is_game_over():
+        wm = willy.get_move(b.fen())
+        b.push(chess.Move.from_uci(wm))
+        res = [b.fen(), "Willy moved: " + wm]
+    else:
+        res = [b.fen(), "Game Over"]
+else:
+    res = None
+res
+                `);
+
+                if (result === null) {
+                    log("Invalid move.");
+                    return 'snapback';
+                }
+
+                board.position(result[0]);
+                log(result[1]);
+            } catch (e) {
+                log("Move Error: " + e.message);
+            }
+        }
+
+        initWilly();
+    </script>
 </body>
 </html>
