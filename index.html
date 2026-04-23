@@ -2,52 +2,33 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WILLY V9.1 - PRO EDITION</title>
+    <title>WILLY V9.2 - PRO CORE</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
     <style>
-        :root { --neon-green: #00ff41; --dark-bg: #0a0a0a; }
-        body { background: var(--dark-bg); color: var(--neon-green); font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-        .main-layout { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
-        
-        #board { width: 450px; border: 4px solid #333; box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); }
-        
-        .side-panel { width: 300px; background: #111; border: 1px solid #333; padding: 15px; display: flex; flex-direction: column; }
-        .stats-box { border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
-        #move-history { height: 300px; overflow-y: auto; font-size: 12px; background: #000; padding: 10px; border: 1px solid #222; }
-        
-        .status-light { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #555; margin-right: 5px; }
-        .active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
-        
-        button { margin-top: 10px; padding: 10px; background: #111; color: var(--neon-green); border: 1px solid var(--neon-green); cursor: pointer; text-transform: uppercase; }
-        button:hover { background: var(--neon-green); color: #000; }
-        
-        #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        :root { --neon: #00ff41; --bg: #050505; }
+        body { background: var(--bg); color: var(--neon); font-family: 'Courier New', monospace; text-align: center; padding: 20px; }
+        #board { width: 400px; margin: 20px auto; border: 3px solid #333; box-shadow: 0 0 15px rgba(0,255,65,0.2); }
+        .panel { background: #111; border: 1px solid #333; padding: 15px; width: 400px; margin: 0 auto; text-align: left; }
+        #status { font-weight: bold; color: #fff; margin-bottom: 10px; }
+        #history { height: 100px; overflow-y: auto; background: #000; padding: 5px; font-size: 12px; border: 1px solid #222; }
+        .loading-screen { position: fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:100; display:flex; align-items:center; justify-content:center; }
+        button { background: #111; color: var(--neon); border: 1px solid var(--neon); padding: 8px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: var(--neon); color: #000; }
     </style>
 </head>
 <body>
 
-<div id="loader">
-    <h1>WAKING WILLY V9.1...</h1>
-    <div id="load-status">Loading Python Environment...</div>
-</div>
+<div id="loading-screen" class="loading-screen"><h1>WAKING UP WILLY...</h1></div>
 
-<div class="main-layout">
-    <div>
-        <div id="board"></div>
-        <div style="margin-top: 10px;">
-            <button onclick="location.reload()">HARD RESET ENGINE</button>
-            <button onclick="undoMove()">UNDO MOVE</button>
-        </div>
-    </div>
+<h2>WILLY V9.2: PRO ENGINE</h2>
 
-    <div class="side-panel">
-        <div class="stats-box">
-            <div id="turn-indicator"><span class="status-light active" id="light"></span> <span id="status-text">WAITING FOR ENGINE...</span></div>
-            <p>GAMES: <span id="g_count">1</span> | WINS: <span id="w_count">0</span></p>
-        </div>
-        <strong>MOVE HISTORY</strong>
-        <div id="move-history"></div>
-    </div>
+<div id="board"></div>
+
+<div class="panel">
+    <div id="status">STATUS: INITIALIZING...</div>
+    <strong>HISTORY:</strong>
+    <div id="history"></div>
+    <button onclick="location.reload()">RELOAD ENGINE</button>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
@@ -57,30 +38,27 @@
 <script>
     let pyodide;
     let board;
-    let game_history = [];
+    let game_state = "LIVE";
+    let isThinking = false;
 
     async function init() {
-        try {
-            document.getElementById('load-status').innerText = "Downloading Chess Libraries...";
-            pyodide = await loadPyodide();
-            await pyodide.loadPackage("micropip");
-            const micropip = pyodide.pyimport("micropip");
-            await micropip.install("python-chess");
+        pyodide = await loadPyodide();
+        await pyodide.loadPackage("micropip");
+        const micropip = pyodide.pyimport("micropip");
+        await micropip.install("python-chess");
 
-            document.getElementById('load-status').innerText = "Syncing Minimax Brain...";
-            await pyodide.runPythonAsync(`
+        // The Full-Strength Python Brain
+        await pyodide.runPythonAsync(`
 import chess
-import random
 import math
 
-class WillyV91:
+class WillyBrain:
     def __init__(self):
         self.values = {1:100, 2:320, 3:330, 4:500, 5:900, 6:20000}
-        self.book = {"": ["e2e4", "d2d4"], "e2e4": ["c7c5", "e7e5"], "d2d4": ["d7d5", "g8f6"]}
 
     def eval(self, b):
-        if b.is_checkmate(): return 999999 if b.turn == chess.WHITE else -999999
-        if b.is_stalemate() or b.is_insufficient_material(): return 0
+        if b.is_checkmate(): return 999999 if b.turn == chess.BLACK else -999999
+        if b.is_game_over(): return 0
         s = 0
         for sq, p in b.piece_map().items():
             v = self.values.get(p.piece_type, 0)
@@ -89,50 +67,41 @@ class WillyV91:
 
     def minimax(self, b, depth, a, beta, maximizing):
         if depth == 0 or b.is_game_over(): return self.eval(b)
-        
         if maximizing:
             v = -math.inf
             for m in b.legal_moves:
                 b.push(m); v = max(v, self.minimax(b, depth-1, a, beta, False)); b.pop()
-                a = max(a, v); 
+                a = max(a, v)
                 if beta <= a: break
             return v
         else:
             v = math.inf
             for m in b.legal_moves:
                 b.push(m); v = min(v, self.minimax(b, depth-1, a, beta, True)); b.pop()
-                beta = min(beta, v); 
+                beta = min(beta, v)
                 if beta <= a: break
             return v
 
-    def get_best_move(self, fen, hist_str):
+    def get_move(self, fen):
         b = chess.Board(fen)
-        if hist_str in self.book: return random.choice(self.book[hist_str])
-        
         best_m = None
         max_v = -math.inf
-        # DEPTH 3 - Colab Strength
         for m in b.legal_moves:
             b.push(m)
-            v = self.minimax(b, 2, -math.inf, math.inf, True)
+            # Depth 3 for Colab-level play
+            v = self.minimax(b, 2, -math.inf, math.inf, False)
             b.pop()
             if v > max_v:
                 max_v = v
                 best_m = m
-        return best_m.uci() if best_m else list(b.legal_moves)[0].uci()
+        return best_m.uci() if best_m else None
 
-willy = WillyV91()
-            `);
+bot = WillyBrain()
+        `);
 
-            $('#loader').fadeOut();
-            $('#status-text').text("YOUR MOVE");
-            setupBoard();
-        } catch (e) {
-            alert("Engine failed to boot. Check console.");
-        }
-    }
-
-    function setupBoard() {
+        $('#loading-screen').hide();
+        $('#status').text("STATUS: YOUR TURN");
+        
         board = Chessboard('board', {
             draggable: true,
             position: 'start',
@@ -142,24 +111,28 @@ willy = WillyV91()
     }
 
     async function handleMove(source, target) {
-        let move = source + target;
-        $('#status-text').text("WILLY IS THINKING...");
-        $('#light').removeClass('active');
+        if (isThinking || game_state === "OVER") return 'snapback';
+
+        let moveUCI = source + target;
+        isThinking = true;
+        $('#status').text("STATUS: WILLY IS CALCULATING...");
 
         let result = await pyodide.runPythonAsync(`
 import chess
 b = chess.Board("${board.fen()}")
 try:
-    m = chess.Move.from_uci("${move}")
+    m = chess.Move.from_uci("${moveUCI}")
     if m in b.legal_moves:
         b.push(m)
+        move_log = "You: " + "${moveUCI}"
+        
         if not b.is_game_over():
-            wm = willy.get_best_move(b.fen(), "")
-            b.push(chess.Move.from_uci(wm))
-            status = "Willy played " + wm
-        else:
-            status = "Game Over"
-        [b.fen(), status, b.is_checkmate(), b.result()]
+            wm = bot.get_move(b.fen())
+            if wm:
+                b.push(chess.Move.from_uci(wm))
+                move_log += " | Willy: " + wm
+        
+        [b.fen(), move_log, b.is_game_over()]
     else:
         None
 except:
@@ -167,25 +140,23 @@ except:
         `);
 
         if (!result) {
-            $('#status-text').text("INVALID MOVE");
-            $('#light').addClass('active');
+            $('#status').text("STATUS: INVALID MOVE");
+            isThinking = false;
             return 'snapback';
         }
 
         board.position(result[0]);
-        $('#status-text').text(result[1]);
-        $('#light').addClass('active');
+        $('#history').append("<div>" + result[1] + "</div>");
+        $("#history").scrollTop($("#history")[0].scrollHeight);
         
-        // Update History
-        $('#move-history').append("<div>" + result[1] + "</div>");
-        $("#move-history").scrollTop($("#move-history")[0].scrollHeight);
-    }
-
-    function undoMove() {
-        // Simple board reset for now, can be expanded to full undo
-        board.start();
-        $('#move-history').empty();
-        $('#status-text').text("GAME RESET");
+        if (result[2]) {
+            game_state = "OVER";
+            $('#status').text("STATUS: GAME OVER");
+        } else {
+            $('#status').text("STATUS: YOUR TURN");
+        }
+        
+        isThinking = false;
     }
 
     init();
