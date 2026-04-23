@@ -2,164 +2,271 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WILLY V9.2 - PRO CORE</title>
+    <title>WILLY V10 - COLAB STRENGTH</title>
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    
     <style>
-        :root { --neon: #00ff41; --bg: #050505; }
-        body { background: var(--bg); color: var(--neon); font-family: 'Courier New', monospace; text-align: center; padding: 20px; }
-        #board { width: 400px; margin: 20px auto; border: 3px solid #333; box-shadow: 0 0 15px rgba(0,255,65,0.2); }
-        .panel { background: #111; border: 1px solid #333; padding: 15px; width: 400px; margin: 0 auto; text-align: left; }
-        #status { font-weight: bold; color: #fff; margin-bottom: 10px; }
-        #history { height: 100px; overflow-y: auto; background: #000; padding: 5px; font-size: 12px; border: 1px solid #222; }
-        .loading-screen { position: fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:100; display:flex; align-items:center; justify-content:center; }
-        button { background: #111; color: var(--neon); border: 1px solid var(--neon); padding: 8px; cursor: pointer; margin-top: 10px; }
+        :root { --neon: #00ff41; --bg: #050505; --panel: #111; }
+        body { background: var(--bg); color: var(--neon); font-family: 'Courier New', monospace; text-align: center; margin: 0; padding: 20px; }
+        h2 { letter-spacing: 2px; margin-bottom: 5px; }
+        
+        .container { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        #board { width: 420px; border: 4px solid #222; box-shadow: 0 0 20px rgba(0,255,65,0.15); }
+        
+        .hud { background: var(--panel); border: 1px solid #333; padding: 15px; width: 420px; box-sizing: border-box; text-align: left; }
+        #status-text { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #fff; }
+        
+        #move-log { background: #000; padding: 10px; height: 120px; overflow-y: auto; font-size: 13px; border: 1px solid #222; color: #aaa; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #222; padding-bottom: 2px; }
+        .willy-move { color: var(--neon); }
+        
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .spinner { margin-top: 20px; font-size: 20px; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+        
+        button { background: #000; color: var(--neon); border: 1px solid var(--neon); padding: 10px 15px; cursor: pointer; font-family: inherit; font-weight: bold; width: 100%; margin-top: 10px; }
         button:hover { background: var(--neon); color: #000; }
     </style>
 </head>
 <body>
 
-<div id="loading-screen" class="loading-screen"><h1>WAKING UP WILLY...</h1></div>
+<div id="loader" class="loading-overlay">
+    <h1 style="color:#fff;">DOWNLOADING WILLY CORE</h1>
+    <div id="load-msg" style="color:var(--neon);">Initializing Pyodide Environment...</div>
+    <div class="spinner">_</div>
+</div>
 
-<h2>WILLY V9.2: PRO ENGINE</h2>
-
-<div id="board"></div>
-
-<div class="panel">
-    <div id="status">STATUS: INITIALIZING...</div>
-    <strong>HISTORY:</strong>
-    <div id="history"></div>
-    <button onclick="location.reload()">RELOAD ENGINE</button>
+<div class="container">
+    <h2>WILLY V10 : GRANDMASTER</h2>
+    
+    <div id="board"></div>
+    
+    <div class="hud">
+        <div id="status-text">SYSTEM OFFLINE</div>
+        <div id="move-log"></div>
+        <button onclick="resetGame()">RESET MATCH</button>
+    </div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 
 <script>
     let pyodide;
-    let board;
-    let game_state = "LIVE";
-    let isThinking = false;
+    let board = null;
+    let game = new Chess(); // The JavaScript Referee
+    let moveCount = 1;
 
-    async function init() {
-        pyodide = await loadPyodide();
-        await pyodide.loadPackage("micropip");
-        const micropip = pyodide.pyimport("micropip");
-        await micropip.install("python-chess");
+    async function bootEngine() {
+        try {
+            // 1. Load Python
+            pyodide = await loadPyodide();
+            document.getElementById('load-msg').innerText = "Installing python-chess (Please wait...)";
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            await micropip.install("python-chess");
 
-        // The Full-Strength Python Brain
-        await pyodide.runPythonAsync(`
+            // 2. Inject Stateless Willy (Depth 3 Alpha-Beta)
+            document.getElementById('load-msg').innerText = "Compiling Minimax Logic...";
+            await pyodide.runPythonAsync(`
 import chess
 import math
+import random
 
-class WillyBrain:
+class WillyEngine:
     def __init__(self):
-        self.values = {1:100, 2:320, 3:330, 4:500, 5:900, 6:20000}
+        self.values = {
+            chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
+            chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20000
+        }
 
-    def eval(self, b):
-        if b.is_checkmate(): return 999999 if b.turn == chess.BLACK else -999999
-        if b.is_game_over(): return 0
-        s = 0
+    def evaluate(self, b):
+        if b.is_checkmate():
+            return 99999 if b.turn == chess.WHITE else -99999
+        if b.is_draw():
+            return 0
+            
+        score = 0
         for sq, p in b.piece_map().items():
-            v = self.values.get(p.piece_type, 0)
-            s += v if p.color == chess.BLACK else -v
-        return s
+            val = self.values.get(p.piece_type, 0)
+            score += val if p.color == chess.BLACK else -val
+        return score
 
-    def minimax(self, b, depth, a, beta, maximizing):
-        if depth == 0 or b.is_game_over(): return self.eval(b)
+    def minimax(self, b, depth, alpha, beta, maximizing):
+        if depth == 0 or b.is_game_over():
+            return self.evaluate(b)
+
         if maximizing:
-            v = -math.inf
-            for m in b.legal_moves:
-                b.push(m); v = max(v, self.minimax(b, depth-1, a, beta, False)); b.pop()
-                a = max(a, v)
-                if beta <= a: break
-            return v
+            max_eval = -math.inf
+            for move in b.legal_moves:
+                b.push(move)
+                ev = self.minimax(b, depth - 1, alpha, beta, False)
+                b.pop()
+                max_eval = max(max_eval, ev)
+                alpha = max(alpha, ev)
+                if beta <= alpha:
+                    break
+            return max_eval
         else:
-            v = math.inf
-            for m in b.legal_moves:
-                b.push(m); v = min(v, self.minimax(b, depth-1, a, beta, True)); b.pop()
-                beta = min(beta, v)
-                if beta <= a: break
-            return v
+            min_eval = math.inf
+            for move in b.legal_moves:
+                b.push(move)
+                ev = self.minimax(b, depth - 1, alpha, beta, True)
+                b.pop()
+                min_eval = min(min_eval, ev)
+                beta = min(beta, ev)
+                if beta <= alpha:
+                    break
+            return min_eval
 
-    def get_move(self, fen):
+    def get_best_move(self, fen):
         b = chess.Board(fen)
-        best_m = None
-        max_v = -math.inf
-        for m in b.legal_moves:
-            b.push(m)
-            # Depth 3 for Colab-level play
-            v = self.minimax(b, 2, -math.inf, math.inf, False)
+        best_move = None
+        max_eval = -math.inf
+        
+        # Colab Strength: Depth 3 Lookahead
+        for move in b.legal_moves:
+            b.push(move)
+            ev = self.minimax(b, 2, -math.inf, math.inf, False)
             b.pop()
-            if v > max_v:
-                max_v = v
-                best_m = m
-        return best_m.uci() if best_m else None
+            
+            if ev > max_eval:
+                max_eval = ev
+                best_move = move
+                
+        # Fallback if something weird happens
+        if best_move is None:
+            best_move = random.choice(list(b.legal_moves))
+            
+        return best_move.uci()
 
-bot = WillyBrain()
-        `);
+willy = WillyEngine()
+            `);
 
-        $('#loading-screen').hide();
-        $('#status').text("STATUS: YOUR TURN");
-        
-        board = Chessboard('board', {
-            draggable: true,
-            position: 'start',
-            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
-            onDrop: handleMove
+            // 3. Start UI
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('status-text').innerText = "YOUR TURN (WHITE)";
+            
+            var config = {
+                draggable: true,
+                position: 'start',
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            };
+            board = Chessboard('board', config);
+            
+        } catch (error) {
+            document.getElementById('load-msg').innerText = "CRITICAL ERROR. CHECK CONSOLE.";
+            document.getElementById('load-msg').style.color = "red";
+            console.error(error);
+        }
+    }
+
+    // Prevents picking up pieces if game over or if it's Willy's turn
+    function onDragStart(source, piece, position, orientation) {
+        if (game.game_over()) return false;
+        if (piece.search(/^b/) !== -1) return false; // Prevent moving black pieces
+    }
+
+    // Handles the piece drop
+    function onDrop(source, target) {
+        // 1. JS Referee checks if move is legal
+        var move = game.move({
+            from: source,
+            to: target,
+            promotion: 'q' // Always promote to queen for simplicity
         });
+
+        // Illegal move? Snap it back immediately.
+        if (move === null) return 'snapback';
+
+        // 2. Legal move! Update UI
+        logMove("YOU", move.san);
+        updateStatus();
+
+        // 3. Trigger Willy (Using setTimeout so the browser draws your piece first)
+        if (!game.game_over()) {
+            document.getElementById('status-text').innerText = "WILLY IS THINKING...";
+            document.getElementById('status-text').style.color = "yellow";
+            
+            setTimeout(makeWillyMove, 250);
+        }
     }
 
-    async function handleMove(source, target) {
-        if (isThinking || game_state === "OVER") return 'snapback';
+    // Updates board to handle castling, en passant, promotions visually
+    function onSnapEnd() {
+        board.position(game.fen());
+    }
 
-        let moveUCI = source + target;
-        isThinking = true;
-        $('#status').text("STATUS: WILLY IS CALCULATING...");
-
-        let result = await pyodide.runPythonAsync(`
-import chess
-b = chess.Board("${board.fen()}")
-try:
-    m = chess.Move.from_uci("${moveUCI}")
-    if m in b.legal_moves:
-        b.push(m)
-        move_log = "You: " + "${moveUCI}"
-        
-        if not b.is_game_over():
-            wm = bot.get_move(b.fen())
-            if wm:
-                b.push(chess.Move.from_uci(wm))
-                move_log += " | Willy: " + wm
-        
-        [b.fen(), move_log, b.is_game_over()]
-    else:
-        None
-except:
-    None
-        `);
-
-        if (!result) {
-            $('#status').text("STATUS: INVALID MOVE");
-            isThinking = false;
-            return 'snapback';
+    // Asks Python for the move
+    async function makeWillyMove() {
+        try {
+            let currentFen = game.fen();
+            
+            // Call the stateless Python brain
+            let willyUciMove = await pyodide.runPythonAsync(`willy.get_best_move("${currentFen}")`);
+            
+            // Apply Willy's move to the JS Referee
+            let move = game.move(willyUciMove, { sloppy: true });
+            
+            // Update UI
+            board.position(game.fen());
+            logMove("WILLY", move.san);
+            updateStatus();
+            
+        } catch (e) {
+            console.error("Willy Engine Error:", e);
+            document.getElementById('status-text').innerText = "ENGINE CRASHED";
         }
+    }
 
-        board.position(result[0]);
-        $('#history').append("<div>" + result[1] + "</div>");
-        $("#history").scrollTop($("#history")[0].scrollHeight);
+    function updateStatus() {
+        let statusEl = document.getElementById('status-text');
         
-        if (result[2]) {
-            game_state = "OVER";
-            $('#status').text("STATUS: GAME OVER");
+        if (game.in_checkmate()) {
+            statusEl.innerText = "CHECKMATE! GAME OVER.";
+            statusEl.style.color = "red";
+        } else if (game.in_draw() || game.in_stalemate() || game.in_threefold_repetition()) {
+            statusEl.innerText = "DRAW!";
+            statusEl.style.color = "orange";
         } else {
-            $('#status').text("STATUS: YOUR TURN");
+            statusEl.innerText = "YOUR TURN";
+            statusEl.style.color = "var(--neon)";
+            
+            if (game.in_check()) {
+                statusEl.innerText += " (CHECK)";
+                statusEl.style.color = "red";
+            }
         }
-        
-        isThinking = false;
     }
 
-    init();
+    function logMove(player, moveSan) {
+        let logEl = document.getElementById('move-log');
+        let colorClass = player === "WILLY" ? "willy-move" : "";
+        let turnStr = player === "YOU" ? moveCount + ". " : "   ";
+        
+        let html = `<div class="log-entry ${colorClass}">${turnStr}<b>${player}</b> played ${moveSan}</div>`;
+        logEl.innerHTML += html;
+        logEl.scrollTop = logEl.scrollHeight;
+        
+        if (player === "WILLY") moveCount++;
+    }
+
+    function resetGame() {
+        game.reset();
+        board.start();
+        moveCount = 1;
+        document.getElementById('move-log').innerHTML = "";
+        updateStatus();
+    }
+
+    // Start everything
+    bootEngine();
 </script>
 </body>
 </html>
