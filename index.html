@@ -211,8 +211,24 @@ willy = WillyEngine()
             // Call the stateless Python brain
             let willyUciMove = await pyodide.runPythonAsync(`willy.get_best_move("${currentFen}")`);
             
-            // Apply Willy's move to the JS Referee
-            let move = game.move(willyUciMove, { sloppy: true });
+            // Clean up the string just in case
+            willyUciMove = willyUciMove.trim();
+            
+            // Parse the UCI string so chess.js can read it safely
+            let fromSq = willyUciMove.substring(0, 2);
+            let toSq = willyUciMove.substring(2, 4);
+            let promo = willyUciMove.length === 5 ? willyUciMove.charAt(4) : 'q';
+
+            // Apply Willy's move to the JS Referee using the exact object format
+            let move = game.move({
+                from: fromSq,
+                to: toSq,
+                promotion: promo
+            });
+
+            if (move === null) {
+                throw new Error("Referee rejected Python move: " + willyUciMove);
+            }
             
             // Update UI
             board.position(game.fen());
